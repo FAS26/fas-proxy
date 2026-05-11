@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "functions": {
+    "api/anthropic.js": { "maxDuration": 30 },
+    "api/whisper.js": { "maxDuration": 60, "memory": 1024 }
+  }
+}
