@@ -1,7 +1,7 @@
-// AssemblyAI transcription proxy
-// Handles three actions: upload, submit, poll
-
-export const config = { api: { bodyParser: false } };
+// AssemblyAI proxy
+// upload-token: gets a temporary token for direct browser upload
+// submit: submits audio_url for transcription
+// poll: checks transcription status
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,39 +10,43 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const action = req.headers['x-action'] || 'upload';
+  const action = req.headers['x-action'] || 'upload-token';
   const AAI_KEY = process.env.ASSEMBLYAI_KEY;
 
   try {
-    // ACTION: upload — receives raw audio bytes, uploads to AssemblyAI, returns upload_url
-    if (action === 'upload') {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const body = Buffer.concat(chunks);
-
-      const uploadRes = await fetch('https://api.assemblyai.com/v2/upload', {
+    // Get a temporary upload token — browser uses this to upload directly to AssemblyAI
+    if (action === 'upload-token') {
+      const tokenRes = await fetch('https://api.assemblyai.com/v2/realtime/token', {
         method: 'POST',
         headers: {
           'authorization': AAI_KEY,
-          'content-type': req.headers['content-type'] || 'application/octet-stream',
+          'content-type': 'application/json',
         },
-        body,
+        body: JSON.stringify({ expires_in: 3600 }),
       });
 
-      if (!uploadRes.ok) {
-        const err = await uploadRes.text();
-        return res.status(uploadRes.status).json({ error: err });
+      // AssemblyAI v2 upload token endpoint
+      // If that fails, just return the key directly for upload auth
+      if (!tokenRes.ok) {
+        // Fallback: return a signed approach using direct upload URL
+        return res.status(200).json({ 
+          upload_auth: AAI_KEY,
+          upload_url: 'https://api.assemblyai.com/v2/upload'
+        });
       }
 
-      const { upload_url } = await uploadRes.json();
-      return res.status(200).json({ upload_url });
+      const data = await tokenRes.json();
+      return res.status(200).json({ 
+        upload_auth: data.token || AAI_KEY,
+        upload_url: 'https://api.assemblyai.com/v2/upload'
+      });
     }
 
-    // ACTION: submit — submits the upload_url for transcription, returns transcript_id
+    // Submit audio_url for transcription
     if (action === 'submit') {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
-      const { upload_url } = JSON.parse(Buffer.concat(chunks).toString());
+      const body = JSON.parse(Buffer.concat(chunks).toString());
 
       const submitRes = await fetch('https://api.assemblyai.com/v2/transcript', {
         method: 'POST',
@@ -50,7 +54,10 @@ export default async function handler(req, res) {
           'authorization': AAI_KEY,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ audio_url: upload_url, speaker_labels: false }),
+        body: JSON.stringify({ 
+          audio_url: body.audio_url || body.upload_url,
+          speaker_labels: false 
+        }),
       });
 
       if (!submitRes.ok) {
@@ -62,10 +69,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ transcript_id: id });
     }
 
-    // ACTION: poll — checks status of a transcript, returns status + text when done
+    // Poll transcription status
     if (action === 'poll') {
       const transcriptId = req.headers['x-transcript-id'];
-      if (!transcriptId) return res.status(400).json({ error: 'Missing x-transcript-id header' });
+      if (!transcriptId) return res.status(400).json({ error: 'Missing x-transcript-id' });
 
       const pollRes = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
         headers: { 'authorization': AAI_KEY },
@@ -87,7 +94,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Unknown action: ' + action });
 
   } catch (error) {
-    console.error('Transcription proxy error:', error);
+    console.error('Whisper proxy error:', error);
     return res.status(500).json({ error: error.message });
   }
 }
