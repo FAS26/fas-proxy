@@ -1,8 +1,3 @@
-// AssemblyAI proxy
-// upload-token: gets a temporary token for direct browser upload
-// submit: submits audio_url for transcription
-// poll: checks transcription status
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -14,30 +9,10 @@ export default async function handler(req, res) {
   const AAI_KEY = process.env.ASSEMBLYAI_KEY;
 
   try {
-    // Get a temporary upload token — browser uses this to upload directly to AssemblyAI
+    // Get upload auth so browser can upload directly to AssemblyAI
     if (action === 'upload-token') {
-      const tokenRes = await fetch('https://api.assemblyai.com/v2/realtime/token', {
-        method: 'POST',
-        headers: {
-          'authorization': AAI_KEY,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ expires_in: 3600 }),
-      });
-
-      // AssemblyAI v2 upload token endpoint
-      // If that fails, just return the key directly for upload auth
-      if (!tokenRes.ok) {
-        // Fallback: return a signed approach using direct upload URL
-        return res.status(200).json({ 
-          upload_auth: AAI_KEY,
-          upload_url: 'https://api.assemblyai.com/v2/upload'
-        });
-      }
-
-      const data = await tokenRes.json();
-      return res.status(200).json({ 
-        upload_auth: data.token || AAI_KEY,
+      return res.status(200).json({
+        upload_auth: AAI_KEY,
         upload_url: 'https://api.assemblyai.com/v2/upload'
       });
     }
@@ -54,9 +29,10 @@ export default async function handler(req, res) {
           'authorization': AAI_KEY,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ 
-          audio_url: body.audio_url || body.upload_url,
-          speaker_labels: false 
+        body: JSON.stringify({
+          audio_url: body.audio_url,
+          speech_model: 'universal-2',
+          speaker_labels: false
         }),
       });
 
